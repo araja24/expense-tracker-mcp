@@ -83,7 +83,7 @@ It will prompt for the four secrets, which are deliberately not in git:
 | `DATABASE_URL` | session pooler string for `mcp_oauth_rw` (below) |
 | `APP_URL` | where the web app is hosted |
 
-`PUBLIC_URL` is already set to `https://tally-mcp.onrender.com` in the blueprint.
+`PUBLIC_URL` is already set to `https://tally.onrender.com` in the blueprint.
 **Check this against the URL Render actually gives you** — if the name was taken
 it appends a suffix, and the discovery documents would then advertise an address
 no client can reach. `PORT` is Render's to set; leave it alone.

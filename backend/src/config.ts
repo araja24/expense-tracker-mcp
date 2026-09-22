@@ -10,16 +10,13 @@ function required(name: string): string {
   return value;
 }
 
+/** An empty value is treated as unset — hosts often inject blank variables. */
 function optional(name: string, fallback: string): string {
-  return process.env[name] ?? fallback;
+  const value = process.env[name];
+  return value === undefined || value.trim() === '' ? fallback : value.trim();
 }
 
 /**
- * The public origin this server is reachable at. It is the OAuth issuer and
- * the resource identifier, so it has to be the real external URL — not
- * localhost — once deployed.
- */
-/*
  * Hosts often expose a service's address as a bare hostname rather than a URL
  * (Render's `fromService` property is one), so a scheme-less value is accepted
  * and assumed to be https — which is the only thing it could legitimately be
@@ -30,7 +27,20 @@ function toOrigin(value: string): URL {
   return new URL(withScheme);
 }
 
-const publicUrl = toOrigin(optional('PUBLIC_URL', 'http://localhost:8787'));
+/**
+ * The public origin this server is reachable at. It is the OAuth issuer and
+ * the resource identifier, so it has to be the real external URL — not
+ * localhost — once deployed.
+ *
+ * Render appends a suffix when a service name is taken, so the final hostname
+ * is not knowable in advance. It publishes the real one as RENDER_EXTERNAL_URL,
+ * which is used when PUBLIC_URL is not set explicitly — that way nothing has to
+ * be hardcoded or corrected after the first deploy. An explicit PUBLIC_URL
+ * still wins, for a custom domain.
+ */
+const publicUrl = toOrigin(
+  optional('PUBLIC_URL', optional('RENDER_EXTERNAL_URL', 'http://localhost:8787'))
+);
 
 const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname);
 
@@ -103,8 +113,12 @@ export const config = {
    */
   databaseUrl: required('DATABASE_URL'),
 
-  /** Where the user is sent after connecting, and which origins may call us. */
-  appUrl: optional('APP_URL', 'http://localhost:5173'),
+  /**
+   * Where the user is sent after connecting. Normalised the same way as
+   * PUBLIC_URL so a host that supplies a bare hostname does not blow up when
+   * this is parsed as a URL.
+   */
+  appUrl: toOrigin(optional('APP_URL', 'http://localhost:5173')).href,
   corsOrigins: optional('CORS_ORIGINS', 'http://localhost:5173')
     .split(',')
     .map(o => o.trim())

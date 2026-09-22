@@ -1,9 +1,11 @@
-# Render blueprint. Point Render at this repo (New → Blueprint) and it creates
-# the service from here; the values marked `sync: false` are prompted for on
-# first deploy and stored as secrets rather than living in git.
+# Render blueprint: the MCP server and the web app, from one repo.
+#
+# In Render: New → Blueprint, pick this repo. Values marked `sync: false` are
+# prompted for on the first deploy and stored as secrets rather than in git.
 services:
+  # ---------------------------------------------------------------- MCP server
   - type: web
-    name: tally-mcp
+    name: tally
     runtime: node
     plan: free
     # The repo root holds the frontend too, so build and run from backend/.
@@ -13,18 +15,20 @@ services:
     healthCheckPath: /health
 
     envVars:
-      # Render assigns PORT itself; the app reads it. PUBLIC_URL is a different
-      # thing — the address the outside world uses, and the OAuth issuer.
-      #
-      # Render serves this service at https://<name>.onrender.com. If it had to
-      # append a suffix because the name was taken, correct this to match the
-      # URL shown in the dashboard, or the discovery documents will advertise
-      # an address clients cannot reach.
-      - key: PUBLIC_URL
-        value: https://tally-mcp.onrender.com
-
+      # PUBLIC_URL is deliberately absent. Render appends a suffix when a name
+      # is taken, so the real hostname is not knowable here; the server falls
+      # back to RENDER_EXTERNAL_URL, which Render sets to the actual URL. Set
+      # PUBLIC_URL explicitly only for a custom domain.
       - key: NODE_VERSION
         value: "22"
+
+      # Linked from the consent screen. Wired to the static site below, so it
+      # tracks whatever hostname Render gives it.
+      - key: APP_URL
+        fromService:
+          type: web
+          name: tally-app
+          property: host
 
       # The anon key, never the service-role key — startup refuses the latter.
       - key: SUPABASE_URL
@@ -37,6 +41,42 @@ services:
       - key: DATABASE_URL
         sync: false
 
-      # Where the web app is hosted; linked from the consent screen.
-      - key: APP_URL
+  # ------------------------------------------------------------------- web app
+  - type: web
+    name: tally-app
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+
+    # The app is a single-page app: React Router owns the paths, so every
+    # unmatched request has to return index.html. Without this, opening
+    # /transactions directly — or refreshing it — is a 404.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+      # VITE_ variables are baked into the bundle at build time, so these are
+      # build inputs, not runtime config — changing one needs a redeploy.
+      #
+      # The anon key belongs in the bundle: it is public by design, and RLS is
+      # what protects the data. A service-role key here would be a disaster.
+      - key: VITE_SUPABASE_URL
         sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+
+      # Shown on Settings → Connect your AI assistant, and what users paste
+      # into their MCP client. Only the hostname is passed, because a blueprint
+      # cannot append "/mcp" to a service reference — the app builds the full
+      # URL from it.
+      - key: VITE_MCP_SERVER_HOST
+        fromService:
+          type: web
+          name: tally
+          property: host

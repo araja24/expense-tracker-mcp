@@ -110,8 +110,8 @@ app.get('/mcp', bearerAuth, notAllowed);
 app.delete('/mcp', bearerAuth, notAllowed);
 
 const server = app.listen(config.port, () => {
-  console.log(`[tally-mcp] listening on ${config.publicUrl.href} (port ${config.port})`);
-  console.log(`[tally-mcp] MCP endpoint: ${new URL('/mcp', config.publicUrl).href}`);
+  console.log(`[tally] listening on ${config.publicUrl.href} (port ${config.port})`);
+  console.log(`[tally] MCP endpoint: ${new URL('/mcp', config.publicUrl).href}`);
 });
 
 // Expired codes and pending authorizations pile up otherwise; nothing here is
@@ -119,7 +119,7 @@ const server = app.listen(config.port, () => {
 const purgeTimer = setInterval(
   () => {
     void query('select mcp_oauth.purge_expired()').catch(cause =>
-      console.error('[tally-mcp] purge failed', cause)
+      console.error('[tally] purge failed', cause)
     );
   },
   60 * 60 * 1000
@@ -127,7 +127,7 @@ const purgeTimer = setInterval(
 purgeTimer.unref();
 
 async function shutdown(signal: string) {
-  console.log(`[tally-mcp] ${signal} received, shutting down`);
+  console.log(`[tally] ${signal} received, shutting down`);
   clearInterval(purgeTimer);
   server.close();
   await pool.end();

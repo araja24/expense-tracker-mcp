@@ -28,7 +28,7 @@ export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
     // "Internal Server Error" with an empty log.
     const message = cause instanceof Error ? cause.message : String(cause);
     const firstLine = text.trim().split('\n')[0] ?? '';
-    console.error(`[tally-mcp] database query failed: ${message} — ${firstLine}…`);
+    console.error(`[tally] database query failed: ${message} — ${firstLine}…`);
     throw cause;
   }
 }

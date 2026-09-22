@@ -17,7 +17,16 @@ import {
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 
-const MCP_URL = import.meta.env.VITE_MCP_SERVER_URL ?? 'http://localhost:8787/mcp'
+/*
+ * Render only knows the API's hostname once that service exists, and a
+ * blueprint cannot concatenate a path onto it. So the host can be injected on
+ * its own (via `fromService`) and the URL built here; an explicit full URL
+ * still wins, for a custom domain or local work.
+ */
+const MCP_HOST = import.meta.env.VITE_MCP_SERVER_HOST
+const MCP_URL =
+  import.meta.env.VITE_MCP_SERVER_URL ??
+  (MCP_HOST ? `https://${MCP_HOST}/mcp` : 'http://localhost:8787/mcp')
 
 /** A client that has called in the last day is worth calling active. */
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000
