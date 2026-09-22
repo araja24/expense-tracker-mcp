@@ -1,0 +1,42 @@
+# Render blueprint. Point Render at this repo (New → Blueprint) and it creates
+# the service from here; the values marked `sync: false` are prompted for on
+# first deploy and stored as secrets rather than living in git.
+services:
+  - type: web
+    name: tally-mcp
+    runtime: node
+    plan: free
+    # The repo root holds the frontend too, so build and run from backend/.
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+
+    envVars:
+      # Render assigns PORT itself; the app reads it. PUBLIC_URL is a different
+      # thing — the address the outside world uses, and the OAuth issuer.
+      #
+      # Render serves this service at https://<name>.onrender.com. If it had to
+      # append a suffix because the name was taken, correct this to match the
+      # URL shown in the dashboard, or the discovery documents will advertise
+      # an address clients cannot reach.
+      - key: PUBLIC_URL
+        value: https://tally-mcp.onrender.com
+
+      - key: NODE_VERSION
+        value: "22"
+
+      # The anon key, never the service-role key — startup refuses the latter.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+      # Session pooler string (port 5432) for the restricted mcp_oauth_rw role.
+      # See supabase/create_mcp_role.sql.
+      - key: DATABASE_URL
+        sync: false
+
+      # Where the web app is hosted; linked from the consent screen.
+      - key: APP_URL
+        sync: false

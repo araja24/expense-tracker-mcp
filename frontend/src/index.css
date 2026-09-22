@@ -1,0 +1,222 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Tally's theme. The values come from the design mockups: a zinc canvas with
+ * white surfaces, a blue-600 primary, and Plus Jakarta Sans at weight 500 as
+ * the base — shadcn components are themed to this rather than shipping their
+ * defaults.
+ */
+:root {
+  --radius: 0.5rem;
+
+  --background: #f4f4f5;
+  --foreground: #18181b;
+
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --primary-hover: #1d4ed8;
+  --primary-tint: #eff6ff;
+
+  --secondary: #fafafa;
+  --secondary-foreground: #18181b;
+
+  --muted: #fafafa;
+  --muted-foreground: #71717a;
+  --subtle-foreground: #a1a1aa;
+
+  --accent: #eff6ff;
+  --accent-foreground: #1d4ed8;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --destructive-tint: #fef2f2;
+
+  --success: #16a34a;
+  --warning: #ea580c;
+
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #2563eb;
+
+  /* The mockups use a lighter rule inside cards than around them. */
+  --divider: #f1f1f3;
+
+  /* Ink ramp, straight from the mockups. */
+  --ink-strong: #18181b;
+  --ink-mid: #3f3f46;
+  --ink-label: #52525b;
+  --ink-muted: #71717a;
+  --ink-subtle: #a1a1aa;
+
+  --danger-strong: #dc2626;
+  --danger-tint: #fef2f2;
+  --danger-border: #fecaca;
+  --positive-strong: #15803d;
+  --positive-tint: #f0fdf4;
+  --blue-100: #bfdbfe;
+
+  /* Category palette — shared with the database defaults so a category keeps
+     its colour across charts, badges and budget bars. */
+  --chart-1: #2563eb;
+  --chart-2: #ec4899;
+  --chart-3: #f97316;
+  --chart-4: #8b5cf6;
+  --chart-5: #14b8a6;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #52525b;
+  --sidebar-accent: #eff6ff;
+  --sidebar-accent-foreground: #1d4ed8;
+  --sidebar-border: #e4e4e7;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --popover: #18181b;
+  --popover-foreground: #fafafa;
+
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --primary-hover: #60a5fa;
+  --primary-tint: #1e293b;
+
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --subtle-foreground: #71717a;
+
+  --accent: #1e293b;
+  --accent-foreground: #93c5fd;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --destructive-tint: #2a1215;
+
+  --success: #22c55e;
+  --warning: #fb923c;
+
+  --border: #27272a;
+  --input: #3f3f46;
+  --ring: #3b82f6;
+
+  --divider: #232326;
+
+  --ink-strong: #fafafa;
+  --ink-mid: #d4d4d8;
+  --ink-label: #a1a1aa;
+  --ink-muted: #a1a1aa;
+  --ink-subtle: #71717a;
+
+  --danger-strong: #ef4444;
+  --danger-tint: #2a1215;
+  --danger-border: #5c2b2e;
+  --positive-strong: #22c55e;
+  --positive-tint: #0f2417;
+  --blue-100: #1e3a8a;
+
+  --chart-1: #3b82f6;
+  --chart-2: #f472b6;
+  --chart-3: #fb923c;
+  --chart-4: #a78bfa;
+  --chart-5: #2dd4bf;
+
+  --sidebar: #18181b;
+  --sidebar-foreground: #a1a1aa;
+  --sidebar-accent: #1e293b;
+  --sidebar-accent-foreground: #93c5fd;
+  --sidebar-border: #27272a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-tint: var(--primary-tint);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-tint: var(--destructive-tint);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-divider: var(--divider);
+  --color-ink-strong: var(--ink-strong);
+  --color-ink-mid: var(--ink-mid);
+  --color-ink-label: var(--ink-label);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-tint: var(--danger-tint);
+  --color-danger-border: var(--danger-border);
+  --color-positive-strong: var(--positive-strong);
+  --color-positive-tint: var(--positive-tint);
+  --color-blue-100: var(--blue-100);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/40;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    /* The mockups set the base weight to 500, not 400 — it is what gives the
+       UI its density. */
+    font-weight: 500;
+    font-feature-settings: 'tnum' 0;
+  }
+
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+  }
+
+  /* Money and dates line up in columns only with tabular figures. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
