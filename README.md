@@ -67,26 +67,44 @@ npm run dev                  # http://localhost:5173
 
 ---
 
-## Deploying the MCP server to Render
+## Deploying to Render
 
-`render.yaml` in the repo root describes the service. In Render: **New →
-Blueprint**, pick this repo, and it reads that file — builds from `backend/`,
-runs `npm ci && npm run build`, starts with `npm start`, and health-checks
-`/health`.
+`render.yaml` in the repo root describes two services, built from this one
+repo. In Render: **New → Blueprint**, pick this repo, and it reads that file.
 
-It will prompt for the four secrets, which are deliberately not in git:
+| Service | Type | Builds from | Does |
+|---|---|---|---|
+| `tally-mcp` | Node web service | `backend/` | The MCP server — OAuth, tools, resources |
+| `tally-app` | Static site | `frontend/` | The web app |
 
-| Variable | Value |
-|---|---|
-| `SUPABASE_URL` | your project URL |
-| `SUPABASE_ANON_KEY` | the **anon** key — a service-role key is refused at startup |
-| `DATABASE_URL` | session pooler string for `mcp_oauth_rw` (below) |
-| `APP_URL` | where the web app is hosted |
+Each builds with `npm ci && npm run build`; `tally-mcp` starts with `npm start`
+and health-checks `/health`, `tally-app` publishes `dist/` with a catch-all
+rewrite to `index.html` (it's a single-page app — without the rewrite,
+refreshing `/transactions` is a 404).
 
-`PUBLIC_URL` is already set to `https://tally.onrender.com` in the blueprint.
-**Check this against the URL Render actually gives you** — if the name was taken
-it appends a suffix, and the discovery documents would then advertise an address
-no client can reach. `PORT` is Render's to set; leave it alone.
+The two are wired together automatically. `tally-mcp` gets `tally-app`'s
+hostname as `APP_URL`; `tally-app` gets `tally-mcp`'s hostname and builds
+`https://<host>/mcp` from it for the connector URL shown in Settings. Neither
+needs to be told the other's address by hand, and neither is hardcoded — Render
+assigns the real hostname (possibly with a suffix, if the name is taken) and
+these references resolve to whatever it actually is.
+
+`PUBLIC_URL` — the MCP server's OAuth issuer — isn't set in the blueprint
+either. The server reads Render's own `RENDER_EXTERNAL_URL` at startup, which
+Render always sets to the service's real address, so the discovery documents
+come out correct on the first deploy regardless of what hostname Render hands
+out. Set `PUBLIC_URL` explicitly only if you later put a custom domain in
+front.
+
+Deploying the blueprint prompts for five secrets, none of them in git:
+
+| Variable | On | Value |
+|---|---|---|
+| `SUPABASE_URL` | `tally-mcp` | your project URL |
+| `SUPABASE_ANON_KEY` | `tally-mcp` | the **anon** key — a service-role key is refused at startup |
+| `DATABASE_URL` | `tally-mcp` | session pooler string for `mcp_oauth_rw` (below) |
+| `VITE_SUPABASE_URL` | `tally-app` | your project URL |
+| `VITE_SUPABASE_ANON_KEY` | `tally-app` | the **anon** key — this one is meant to be public; RLS is what protects the data |
 
 ### The database role
 
@@ -103,24 +121,24 @@ Percent-encode special characters in the password (`@` → `%40`, `#` → `%23`,
 
 ### After the first deploy
 
-Add `https://<your-render-url>/login` to Supabase → Authentication → URL
-Configuration → **Redirect URLs**. The consent page signs the user in through
-Supabase, and Supabase will not redirect back to an origin it has not been told
-about.
+Add `https://<tally-mcp-url>/login` to Supabase → Authentication → URL
+Configuration → **Redirect URLs**, and set **Site URL** to `tally-app`'s URL.
+The consent page signs the user in through Supabase, and Supabase will not
+redirect back to an origin it has not been told about.
 
 Then verify before pointing a client at it:
 
 ```bash
-curl https://<your-render-url>/health
-curl https://<your-render-url>/.well-known/oauth-protected-resource/mcp
+curl https://<tally-mcp-url>/health
+curl https://<tally-mcp-url>/.well-known/oauth-protected-resource/mcp
 ```
 
-The second must report your https URL in `resource` and `authorization_servers`.
-If it says localhost, `PUBLIC_URL` did not take.
+The second must report your actual Render URL in `resource` and
+`authorization_servers` — not localhost, and not a guessed hostname.
 
-> **On the free plan** the service sleeps after inactivity, so the first tool
-> call after a quiet spell waits ~30s for a cold start. Clients sometimes read
-> that as a failed connection.
+> **On the free plan** both services sleep after inactivity, so the first
+> request after a quiet spell waits ~30s for a cold start. Clients sometimes
+> read that as a failed connection.
 
 ---
 

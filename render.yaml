@@ -5,7 +5,7 @@
 services:
   # ---------------------------------------------------------------- MCP server
   - type: web
-    name: tally
+    name: tally-mcp
     runtime: node
     plan: free
     # The repo root holds the frontend too, so build and run from backend/.
@@ -78,5 +78,5 @@ services:
       - key: VITE_MCP_SERVER_HOST
         fromService:
           type: web
-          name: tally
+          name: tally-mcp
           property: host
