@@ -18,15 +18,15 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 
 /*
- * Render only knows the API's hostname once that service exists, and a
- * blueprint cannot concatenate a path onto it. So the host can be injected on
- * its own (via `fromService`) and the URL built here; an explicit full URL
- * still wins, for a custom domain or local work.
+ * The process serving this app is the MCP server, so the endpoint is just /mcp
+ * on this origin. Nothing to inject at build time, and no second hostname that
+ * can drift out of sync with where the server actually is.
+ *
+ * An explicit URL still wins, for `npm run dev` — there the app is on Vite's
+ * port and the API is a separate process on 8787.
  */
-const MCP_HOST = import.meta.env.VITE_MCP_SERVER_HOST
 const MCP_URL =
-  import.meta.env.VITE_MCP_SERVER_URL ??
-  (MCP_HOST ? `https://${MCP_HOST}/mcp` : 'http://localhost:8787/mcp')
+  import.meta.env.VITE_MCP_SERVER_URL ?? new URL('/mcp', window.location.origin).href
 
 /** A client that has called in the last day is worth calling active. */
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000

@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Remote MCP server for the expense tracker — same Supabase data, same RLS, as the web app.",
+  "description": "Tally: the remote MCP server and the web app it belongs to, served from one origin — same Supabase data, same RLS.",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/bundle-web.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },

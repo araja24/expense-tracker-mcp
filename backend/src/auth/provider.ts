@@ -150,7 +150,7 @@ export class SupabaseOAuthProvider implements OAuthServerProvider {
       ]
     );
 
-    const loginUrl = new URL('/login', config.publicUrl);
+    const loginUrl = new URL('/connect', config.publicUrl);
     loginUrl.searchParams.set('request', id);
     res.redirect(loginUrl.toString());
   }

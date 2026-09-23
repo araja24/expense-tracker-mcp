@@ -1,69 +1,54 @@
-# Render blueprint: the MCP server and the web app, from one repo.
+# Render blueprint: the MCP server and the web app, from one repo, as one
+# service.
+#
+# They used to deploy separately, which meant each had to be told the other's
+# URL — and Render only assigns those URLs after the services exist, so the
+# references were either hardcoded or resolved to the wrong (private) hostname.
+# Serving both from one Express process removes the question entirely: one
+# origin, and RENDER_EXTERNAL_URL is the only address anything needs.
 #
 # In Render: New → Blueprint, pick this repo. Values marked `sync: false` are
 # prompted for on the first deploy and stored as secrets rather than in git.
 services:
-  # ---------------------------------------------------------------- MCP server
   - type: web
-    name: tally-mcp
+    name: tally
     runtime: node
     plan: free
-    # The repo root holds the frontend too, so build and run from backend/.
-    rootDir: backend
-    buildCommand: npm ci && npm run build
-    startCommand: npm start
+
+    # No rootDir: the build spans both packages. The frontend is built first,
+    # and the backend's build copies frontend/dist into dist/public (see
+    # backend/scripts/bundle-web.mjs), so the deploy is one self-contained tree.
+    buildCommand: >-
+      npm ci --prefix frontend &&
+      npm run build --prefix frontend &&
+      npm ci --prefix backend &&
+      npm run build --prefix backend
+    startCommand: node backend/dist/index.js
     healthCheckPath: /health
 
-    # PUBLIC_URL is deliberately not set as an envVar here. Render appends a
-    # suffix when a name is taken, so this service's real hostname is not
-    # knowable in advance; the server falls back to RENDER_EXTERNAL_URL, which
-    # Render always sets to the actual URL. Set PUBLIC_URL explicitly only if
-    # you later put a custom domain in front of this service.
+    # PUBLIC_URL is deliberately not set here. Render appends a suffix when a
+    # name is taken, so this service's real hostname is not knowable in advance;
+    # the server falls back to RENDER_EXTERNAL_URL, which Render always sets to
+    # the actual URL. Set PUBLIC_URL explicitly only if you later put a custom
+    # domain in front.
+    #
+    # APP_URL is gone for the same reason it was a problem: the app is this
+    # service, so its URL is PUBLIC_URL.
     envVars:
       - key: NODE_VERSION
         value: "22"
 
-      # Linked from the consent screen. `fromService: property: host` looks
-      # like the right tool here, but it resolves to the service's PRIVATE
-      # network hostname, not the public onrender.com URL — confirmed against
-      # Render's own docs after that URL showed up broken in the live OAuth
-      # discovery document. Hardcoded to the real assigned URL instead.
-      - key: APP_URL
-        value: https://tally-app-a22v.onrender.com
-
-      # The anon key, never the service-role key — startup refuses the latter.
+      # Read by the server at runtime. The anon key, never the service-role key
+      # — startup refuses the latter.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
 
-      # Session pooler string (port 5432) for the restricted mcp_oauth_rw role.
-      # See supabase/create_mcp_role.sql.
-      - key: DATABASE_URL
-        sync: false
-
-  # ------------------------------------------------------------------- web app
-  - type: web
-    name: tally-app
-    runtime: static
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-
-    # The app is a single-page app: React Router owns the paths, so every
-    # unmatched request has to return index.html. Without this, opening
-    # /transactions directly — or refreshing it — is a 404.
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-
-    envVars:
-      - key: NODE_VERSION
-        value: "22"
-
-      # VITE_ variables are baked into the bundle at build time, so these are
-      # build inputs, not runtime config — changing one needs a redeploy.
+      # Baked into the frontend bundle by Vite at build time, so these are build
+      # inputs rather than runtime config — changing one needs a redeploy. Same
+      # two values as above; Vite only exposes variables it can see under a
+      # VITE_ prefix, which is why they are repeated.
       #
       # The anon key belongs in the bundle: it is public by design, and RLS is
       # what protects the data. A service-role key here would be a disaster.
@@ -72,10 +57,7 @@ services:
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
 
-      # Shown on Settings → Connect your AI assistant, and what users paste
-      # into their MCP client. Hardcoded rather than `fromService: property:
-      # host`, which resolves to the private network hostname, not the public
-      # onrender.com URL. Only the hostname is stored here; the app builds the
-      # full https://…/mcp URL from it.
-      - key: VITE_MCP_SERVER_HOST
-        value: tally-mcp.onrender.com
+      # Session pooler string (port 5432) for the restricted mcp_oauth_rw role.
+      # See supabase/create_mcp_role.sql.
+      - key: DATABASE_URL
+        sync: false

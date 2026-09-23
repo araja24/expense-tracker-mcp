@@ -114,15 +114,14 @@ export const config = {
   databaseUrl: required('DATABASE_URL'),
 
   /**
-   * Where the user is sent after connecting. Normalised the same way as
-   * PUBLIC_URL so a host that supplies a bare hostname does not blow up when
-   * this is parsed as a URL.
+   * Where the user is sent after connecting. This process serves the web app
+   * itself, so it is the same origin as the API — there is nothing to
+   * configure and no second service whose URL could drift out of sync.
+   *
+   * Still honours APP_URL for local work, where Vite serves the app on its own
+   * port instead of coming out of dist/.
    */
-  appUrl: toOrigin(optional('APP_URL', 'http://localhost:5173')).href,
-  corsOrigins: optional('CORS_ORIGINS', 'http://localhost:5173')
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean),
+  appUrl: toOrigin(optional('APP_URL', publicUrl.href)).href,
 
   token: {
     /** Short-lived by design; clients refresh silently. */

@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
 import express from 'express';
 import cors from 'cors';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -30,17 +33,31 @@ app.set('trust proxy', 1);
  * endpoints has exactly the access of someone calling them with curl, which is
  * none. `credentials` stays off, which is what keeps that true.
  */
-app.use(
-  cors({
-    origin: '*',
-    credentials: false,
-    // Clients cannot read these off a cross-origin response unless exposed:
-    // the session id for subsequent requests, and the challenge that tells
-    // them where to authenticate.
-    exposedHeaders: ['Mcp-Session-Id', 'WWW-Authenticate'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Mcp-Protocol-Version']
-  })
-);
+const apiCors = cors({
+  origin: '*',
+  credentials: false,
+  // Clients cannot read these off a cross-origin response unless exposed:
+  // the session id for subsequent requests, and the challenge that tells
+  // them where to authenticate.
+  exposedHeaders: ['Mcp-Session-Id', 'WWW-Authenticate'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Mcp-Protocol-Version']
+});
+
+/*
+ * Scoped to the protocol endpoints rather than the whole app. The same process
+ * now serves the web app, and the reasoning above — no cookies, bearer-only —
+ * is what makes the wildcard safe; it does not extend to the app's own pages,
+ * so they are left same-origin.
+ */
+const CORS_PATHS = ['/mcp', '/authorize', '/token', '/register', '/revoke'];
+
+app.use((req, res, next) => {
+  if (CORS_PATHS.includes(req.path) || req.path.startsWith('/.well-known/')) {
+    apiCors(req, res, next);
+    return;
+  }
+  next();
+});
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_req, res) => {
@@ -117,6 +134,65 @@ const notAllowed = (_req: express.Request, res: express.Response) => {
 
 app.get('/mcp', bearerAuth, notAllowed);
 app.delete('/mcp', bearerAuth, notAllowed);
+
+/*
+ * The web app, served by this same process — one origin, one deploy, so there
+ * is no second service whose URL has to be wired in anywhere.
+ *
+ * Everything above is registered first and wins: /health, the discovery
+ * documents, the OAuth endpoints, /connect and /mcp. Only what is left over
+ * reaches the app, which is why the consent page had to move off /login.
+ *
+ * `npm run build` copies frontend/dist here. It is absent when running from
+ * src/ with tsx, where Vite serves the app on its own port instead.
+ */
+const webRoot = path.join(import.meta.dirname, 'public');
+const indexHtml = path.join(webRoot, 'index.html');
+const assetsDir = path.join(webRoot, 'assets');
+
+if (existsSync(indexHtml)) {
+  app.use(
+    express.static(webRoot, {
+      // index.html is served by the fallback below, so that a deploy changing
+      // only the HTML is still picked up on the next navigation.
+      index: false,
+      setHeaders: (res, filePath) => {
+        // Vite fingerprints what it emits into assets/, so those filenames
+        // never change meaning. Anything else — tally.svg and friends — is a
+        // stable name with changing content and has to be revalidated.
+        res.setHeader(
+          'Cache-Control',
+          filePath.startsWith(assetsDir) ? 'public, max-age=31536000, immutable' : 'no-cache'
+        );
+      }
+    })
+  );
+
+  /*
+   * React Router owns the paths, so any unmatched GET has to return the app
+   * shell rather than a 404 — otherwise opening /transactions directly, or
+   * refreshing it, fails. Other methods fall through to a genuine 404.
+   *
+   * /.well-known is excluded deliberately. Clients discovering this server try
+   * several documents there (RFC 8414 allows inserting the resource path), and
+   * they have to be able to tell a missing one apart from a hit — answering
+   * every probe with 200 and a page of HTML means parsing it as JSON and
+   * failing, instead of moving on to the next candidate.
+   */
+  app.use((req, res, next) => {
+    const isPageRequest = req.method === 'GET' || req.method === 'HEAD';
+    if (!isPageRequest || req.path.startsWith('/.well-known/')) {
+      next();
+      return;
+    }
+    res.set('Cache-Control', 'no-cache').sendFile(indexHtml);
+  });
+} else {
+  console.warn(
+    `[tally] no web app at ${webRoot} — serving the API only. ` +
+      'Run `npm run build` to bundle the frontend into this process.'
+  );
+}
 
 const server = app.listen(config.port, () => {
   console.log(`[tally] listening on ${config.publicUrl.href} (port ${config.port})`);

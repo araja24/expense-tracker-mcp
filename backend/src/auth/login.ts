@@ -11,6 +11,11 @@ import { queryOne } from '../db.js';
  *
  * The sign-in itself happens in the browser against Supabase directly, so this
  * server never sees a password.
+ *
+ * Mounted at /connect, not /login: this process also serves the web app, whose
+ * router owns /login for the app's own sign-in page. Nobody types this URL —
+ * it is generated in SupabaseOAuthProvider.authorize — so the OAuth leg is the
+ * one that moves.
  */
 export const loginRouter = express.Router();
 
@@ -155,7 +160,7 @@ function renderLoginPage(requestId: string, clientName: string): string {
   // authorization code and tells us where to send the browser next.
   async function finish(session) {
     show('info', 'Connecting…');
-    const res = await fetch('/login/complete', {
+    const res = await fetch('/connect/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -212,7 +217,7 @@ function renderLoginPage(requestId: string, clientName: string): string {
 </html>`;
 }
 
-loginRouter.get('/login', async (req, res) => {
+loginRouter.get('/connect', async (req, res) => {
   const requestId = typeof req.query.request === 'string' ? req.query.request : '';
   if (!requestId) {
     res.status(400).type('text/plain').send('Missing authorization request.');
@@ -242,7 +247,7 @@ loginRouter.get('/login', async (req, res) => {
     .send(renderLoginPage(requestId, clientName));
 });
 
-loginRouter.post('/login/complete', async (req, res) => {
+loginRouter.post('/connect/complete', async (req, res) => {
   const { request, access_token: accessToken, refresh_token: refreshToken } = req.body ?? {};
 
   if (

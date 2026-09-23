@@ -6,7 +6,8 @@ up automatically — same data, same rules, either path.
 
 ```
 frontend/   Vite + React + TypeScript + Tailwind, built to the Tally mockups
-backend/    Remote MCP server (Node + TypeScript, Streamable HTTP, OAuth 2.1)
+backend/    Remote MCP server (Node + TypeScript, Streamable HTTP, OAuth 2.1),
+            which also serves the built frontend — one deploy, one origin
 supabase/   Postgres schema, RLS policies and reporting functions
 ```
 
@@ -39,8 +40,9 @@ Create a project, then run the migrations in order in the SQL editor:
 
 **Google sign-in** (the primary login) needs an OAuth client registered in the
 Google Cloud Console, with its client ID and secret added under
-*Authentication → Providers → Google* in Supabase. Add both redirect URLs:
-your app's origin, and the MCP server's `/login` page.
+*Authentication → Providers → Google* in Supabase. Add both redirect URLs: your
+origin, and its `/connect` page (the MCP consent screen). In a deploy those are
+the same host — see [Deploying to Render](#deploying-to-render).
 
 **The MCP server's database role.** `0003` ends with a commented block creating
 `mcp_oauth_rw`. Uncomment it, set a real password, and run it. That role can
@@ -65,46 +67,69 @@ npm install
 npm run dev                  # http://localhost:5173
 ```
 
+In development these stay two processes, so that Vite can do hot reloading — the
+app on 5173, the API on 8787, with `APP_URL` and `VITE_MCP_SERVER_URL` pointing
+them at each other. A deploy is a single service instead, the backend serving the
+built app from its own origin; `npm run build` in `backend/` is what stitches
+them together. To exercise that locally, build and run it:
+
+```bash
+npm run build --prefix frontend
+npm run build --prefix backend    # copies frontend/dist -> backend/dist/public
+cd backend && node dist/index.js  # app and /mcp both on http://localhost:8787
+```
+
 ---
 
 ## Deploying to Render
 
-`render.yaml` in the repo root describes two services, built from this one
-repo. In Render: **New → Blueprint**, pick this repo, and it reads that file.
+`render.yaml` in the repo root describes **one** service, `tally`, serving both
+the MCP endpoint and the web app. In Render: **New → Blueprint**, pick this repo,
+and it reads that file.
 
-| Service | Type | Builds from | Does |
-|---|---|---|---|
-| `tally-mcp` | Node web service | `backend/` | The MCP server — OAuth, tools, resources |
-| `tally-app` | Static site | `frontend/` | The web app |
+The build spans both packages: the frontend is built first, then the backend's
+build copies `frontend/dist` into `backend/dist/public`
+([`scripts/bundle-web.mjs`](backend/scripts/bundle-web.mjs)), so the deploy is
+one self-contained tree started with `node backend/dist/index.js` and
+health-checked at `/health`.
 
-Each builds with `npm ci && npm run build`; `tally-mcp` starts with `npm start`
-and health-checks `/health`, `tally-app` publishes `dist/` with a catch-all
-rewrite to `index.html` (it's a single-page app — without the rewrite,
-refreshing `/transactions` is a 404).
+Express registers the API first, so it always wins; whatever is left over is
+served as the web app, with any unmatched GET returning `index.html` because
+React Router owns the paths:
 
-The two are wired together automatically. `tally-mcp` gets `tally-app`'s
-hostname as `APP_URL`; `tally-app` gets `tally-mcp`'s hostname and builds
-`https://<host>/mcp` from it for the connector URL shown in Settings. Neither
-needs to be told the other's address by hand, and neither is hardcoded — Render
-assigns the real hostname (possibly with a suffix, if the name is taken) and
-these references resolve to whatever it actually is.
+| Path | Handled by |
+|---|---|
+| `/health` | health check |
+| `/.well-known/*` | OAuth discovery documents |
+| `/authorize`, `/token`, `/register`, `/revoke` | OAuth endpoints |
+| `/connect`, `/connect/complete` | the MCP consent screen |
+| `/mcp` | the MCP endpoint itself |
+| everything else | the web app (`index.html` fallback) |
 
-`PUBLIC_URL` — the MCP server's OAuth issuer — isn't set in the blueprint
-either. The server reads Render's own `RENDER_EXTERNAL_URL` at startup, which
-Render always sets to the service's real address, so the discovery documents
-come out correct on the first deploy regardless of what hostname Render hands
-out. Set `PUBLIC_URL` explicitly only if you later put a custom domain in
-front.
+This is why the consent screen lives at `/connect` rather than `/login`: the web
+app's own sign-in page owns `/login`, and on one origin they cannot both have it.
+
+### Nothing has to be told its own address
+
+Splitting this across two services used to mean each needed the other's URL —
+and Render only assigns those once the services exist, so the references were
+either hardcoded or resolved to the private hostname rather than the public one.
+On one origin the question disappears. There is no `APP_URL` and no
+`VITE_MCP_SERVER_HOST`: the app reads `/mcp` off `window.location.origin`, and
+the server derives everything from `RENDER_EXTERNAL_URL`, which Render always
+sets to the real URL — so the discovery documents are correct on the first
+deploy whatever hostname it hands out. Set `PUBLIC_URL` only if you later put a
+custom domain in front.
 
 Deploying the blueprint prompts for five secrets, none of them in git:
 
-| Variable | On | Value |
+| Variable | Used | Value |
 |---|---|---|
-| `SUPABASE_URL` | `tally-mcp` | your project URL |
-| `SUPABASE_ANON_KEY` | `tally-mcp` | the **anon** key — a service-role key is refused at startup |
-| `DATABASE_URL` | `tally-mcp` | session pooler string for `mcp_oauth_rw` (below) |
-| `VITE_SUPABASE_URL` | `tally-app` | your project URL |
-| `VITE_SUPABASE_ANON_KEY` | `tally-app` | the **anon** key — this one is meant to be public; RLS is what protects the data |
+| `SUPABASE_URL` | runtime | your project URL |
+| `SUPABASE_ANON_KEY` | runtime | the **anon** key — a service-role key is refused at startup |
+| `DATABASE_URL` | runtime | session pooler string for `mcp_oauth_rw` (below) |
+| `VITE_SUPABASE_URL` | build | same project URL — Vite only exposes `VITE_`-prefixed variables, hence the repetition |
+| `VITE_SUPABASE_ANON_KEY` | build | the **anon** key — this one is meant to be public; RLS is what protects the data |
 
 ### The database role
 
@@ -121,24 +146,35 @@ Percent-encode special characters in the password (`@` → `%40`, `#` → `%23`,
 
 ### After the first deploy
 
-Add `https://<tally-mcp-url>/login` to Supabase → Authentication → URL
-Configuration → **Redirect URLs**, and set **Site URL** to `tally-app`'s URL.
-The consent page signs the user in through Supabase, and Supabase will not
-redirect back to an origin it has not been told about.
+In Supabase → Authentication → URL Configuration, set **Site URL** to the
+service's URL and add two **Redirect URLs**:
+
+```
+https://<your-render-url>/
+https://<your-render-url>/connect
+```
+
+The first is where the web app's own sign-in returns, the second where the MCP
+consent screen does. Both sign the user in through Supabase, and Supabase will
+not redirect back to an origin it has not been told about.
 
 Then verify before pointing a client at it:
 
 ```bash
-curl https://<tally-mcp-url>/health
-curl https://<tally-mcp-url>/.well-known/oauth-protected-resource/mcp
+curl https://<your-render-url>/health
+curl https://<your-render-url>/.well-known/oauth-protected-resource/mcp
+curl -I https://<your-render-url>/transactions    # 200 text/html, not 404
 ```
 
 The second must report your actual Render URL in `resource` and
-`authorization_servers` — not localhost, and not a guessed hostname.
+`authorization_servers` — not localhost, and not a guessed hostname. The third
+confirms the web app is being served and its deep links survive a refresh.
 
-> **On the free plan** both services sleep after inactivity, so the first
-> request after a quiet spell waits ~30s for a cold start. Clients sometimes
-> read that as a failed connection.
+> **On the free plan** the service sleeps after inactivity, so the first request
+> after a quiet spell waits ~30s for a cold start. That now applies to the web
+> app too, not just the MCP endpoint — the tradeoff for one origin is that the
+> app is behind the same Node process instead of a CDN. Clients sometimes read
+> the delay as a failed connection.
 
 ---
 
@@ -155,7 +191,7 @@ cloudflared tunnel --url http://localhost:8787    # or: ngrok http 8787
 ```
 
 The same two rules as a deploy apply: `PUBLIC_URL` must match the tunnel URL,
-and that URL's `/login` path must be in Supabase's Redirect URLs. The MCP
+and that URL's `/connect` path must be in Supabase's Redirect URLs. The MCP
 Inspector talks to `http://localhost:8787/mcp` directly and needs neither.
 
 ### Adding the connector
@@ -204,8 +240,8 @@ server for third-party clients — MCP clients need dynamic registration and PKC
 So the MCP server acts as its own authorization server in front of it:
 
 1. The client registers itself at `/register` and sends the user to `/authorize`.
-2. The server parks the request and redirects to its own `/login` page, where the
-   user signs in against Supabase directly — the server never sees a password.
+2. The server parks the request and redirects to its own `/connect` page, where
+   the user signs in against Supabase directly — the server never sees a password.
 3. That Supabase session is exchanged for an authorization code, then for an
    access token (PKCE-verified) belonging to this server.
 4. On every MCP request the server verifies its own token, refreshes the user's
