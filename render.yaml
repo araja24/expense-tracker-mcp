@@ -14,11 +14,12 @@ services:
     startCommand: npm start
     healthCheckPath: /health
 
+    # PUBLIC_URL is deliberately not set as an envVar here. Render appends a
+    # suffix when a name is taken, so this service's real hostname is not
+    # knowable in advance; the server falls back to RENDER_EXTERNAL_URL, which
+    # Render always sets to the actual URL. Set PUBLIC_URL explicitly only if
+    # you later put a custom domain in front of this service.
     envVars:
-      # PUBLIC_URL is deliberately absent. Render appends a suffix when a name
-      # is taken, so the real hostname is not knowable here; the server falls
-      # back to RENDER_EXTERNAL_URL, which Render sets to the actual URL. Set
-      # PUBLIC_URL explicitly only for a custom domain.
       - key: NODE_VERSION
         value: "22"
 
