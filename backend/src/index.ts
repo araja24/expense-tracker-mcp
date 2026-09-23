@@ -13,6 +13,15 @@ import { pool, query } from './db.js';
 const app = express();
 
 /*
+ * Render (like any managed host) terminates TLS at a proxy and passes the
+ * caller's address in X-Forwarded-For. Without this, rate limiting keys every
+ * request on the proxy's own address — one shared bucket for the whole
+ * internet — and express-rate-limit refuses to guess, logging
+ * ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on each request. One hop: Render's proxy.
+ */
+app.set('trust proxy', 1);
+
+/*
  * Any origin is allowed on purpose. A browser-based MCP client — claude.ai
  * among them — calls the discovery, token and /mcp endpoints from its own
  * origin, and an allowlist of our own app's URL would reject every one of

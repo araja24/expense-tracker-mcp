@@ -131,8 +131,21 @@ function renderLoginPage(requestId: string, clientName: string): string {
   const CLIENT_NAME = ${escapeJs(clientName)};
   document.getElementById('client-name').textContent = CLIENT_NAME;
 
+  // Its own storage key, so clearing the handshake session below cannot
+  // disturb a session the web app stored under the default one.
+  const STORAGE_KEY = 'tally-mcp-connect';
+
   const supabase = createClient(${escapeJs(config.supabase.url)}, ${escapeJs(config.supabase.anonKey)}, {
-    auth: { persistSession: true, detectSessionInUrl: true, flowType: 'pkce' }
+    auth: {
+      persistSession: true,
+      detectSessionInUrl: true,
+      flowType: 'pkce',
+      storageKey: STORAGE_KEY,
+      // The MCP server takes ownership of this session's refresh token and
+      // rotates it itself from here on. If this page refreshed it too, the
+      // copy the server stored would be dead before it was ever used.
+      autoRefreshToken: false
+    }
   });
 
   const msg = document.getElementById('msg');
@@ -153,8 +166,13 @@ function renderLoginPage(requestId: string, clientName: string): string {
     });
     const body = await res.json();
     if (!res.ok) { show('error', body.error_description || body.error || 'Could not complete the connection.'); return; }
-    // The local session existed only to complete this handshake.
-    await supabase.auth.signOut({ scope: 'local' });
+    // Drop this browser's copy of the session, but do NOT call
+    // supabase.auth.signOut(): it posts to GoTrue's /logout even with
+    // scope 'local' — the scope picks which sessions end, not whether the
+    // server is told — which ends this session and invalidates the refresh
+    // token the MCP server has just taken ownership of. Doing that here made
+    // every connection fail on the client's first request.
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* private mode */ }
     window.location.href = body.redirect;
   }
 

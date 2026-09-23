@@ -332,6 +332,13 @@ export class SupabaseOAuthProvider implements OAuthServerProvider {
       // The Supabase session is gone (password change, sign-out everywhere,
       // expiry). Our grant is worthless without it, so drop it and make the
       // client re-authorize rather than fail every tool call from here on.
+      //
+      // Logged because the client only ever sees "authorization failed": this
+      // revokes the grant half a second after it was issued, and without the
+      // cause there is nothing in the logs to say why.
+      console.error(
+        `[tally] supabase session refresh failed for token ${row.id} — ${error?.message ?? 'no session returned'}`
+      );
       await query('update mcp_oauth.tokens set revoked_at = now() where id = $1', [row.id]);
       throw new InvalidTokenError(
         'Your account session has ended. Reconnect the integration to continue.'
