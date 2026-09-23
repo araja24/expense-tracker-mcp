@@ -23,13 +23,13 @@ services:
       - key: NODE_VERSION
         value: "22"
 
-      # Linked from the consent screen. Wired to the static site below, so it
-      # tracks whatever hostname Render gives it.
+      # Linked from the consent screen. `fromService: property: host` looks
+      # like the right tool here, but it resolves to the service's PRIVATE
+      # network hostname, not the public onrender.com URL — confirmed against
+      # Render's own docs after that URL showed up broken in the live OAuth
+      # discovery document. Hardcoded to the real assigned URL instead.
       - key: APP_URL
-        fromService:
-          type: web
-          name: tally-app
-          property: host
+        value: https://tally-app-a22v.onrender.com
 
       # The anon key, never the service-role key — startup refuses the latter.
       - key: SUPABASE_URL
@@ -73,11 +73,9 @@ services:
         sync: false
 
       # Shown on Settings → Connect your AI assistant, and what users paste
-      # into their MCP client. Only the hostname is passed, because a blueprint
-      # cannot append "/mcp" to a service reference — the app builds the full
-      # URL from it.
+      # into their MCP client. Hardcoded rather than `fromService: property:
+      # host`, which resolves to the private network hostname, not the public
+      # onrender.com URL. Only the hostname is stored here; the app builds the
+      # full https://…/mcp URL from it.
       - key: VITE_MCP_SERVER_HOST
-        fromService:
-          type: web
-          name: tally-mcp
-          property: host
+        value: tally-mcp.onrender.com
