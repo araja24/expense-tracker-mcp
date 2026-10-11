@@ -34,8 +34,8 @@ import {
   PageBody,
   PageHeader,
   PrimaryButton,
-  SelectButton,
 } from '@/components/tally'
+import { MonthSwitcher } from '@/components/month-switcher'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface DashboardData {
@@ -52,8 +52,11 @@ interface DashboardData {
 export function DashboardPage() {
   const currency = useCurrency()
   const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
+  const [year, setYear] = React.useState(now.getFullYear())
+  const [month, setMonth] = React.useState(now.getMonth() + 1)
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
+  const monthOnly = monthLabel(year, month).split(' ')[0]
+  const periodWord = isCurrentMonth ? 'this month' : `in ${monthOnly}`
 
   const [data, setData] = React.useState<DashboardData | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -104,7 +107,14 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title="Dashboard">
-        <SelectButton>{monthLabel(year, month)}</SelectButton>
+        <MonthSwitcher
+          year={year}
+          month={month}
+          onChange={(nextYear, nextMonth) => {
+            setYear(nextYear)
+            setMonth(nextMonth)
+          }}
+        />
         <PrimaryButton onClick={() => setDialogOpen(true)}>
           <Plus className="size-4" strokeWidth={2.1} />
           Add expense
@@ -128,7 +138,7 @@ export function DashboardPage() {
               <StatTile
                 icon={CreditCard}
                 tint="#2563EB"
-                label="Spent this month"
+                label={isCurrentMonth ? 'Spent this month' : `Spent in ${monthOnly}`}
                 value={money(data.thisMonth.total, currency)}
                 change={delta(data.thisMonth.total, data.lastMonth.total)}
                 risingIsBad
@@ -150,7 +160,7 @@ export function DashboardPage() {
                 label="Top category"
                 value={topCategory?.category_name ?? '—'}
                 caption={
-                  topCategory ? `${money(topCategory.total, currency)} this month` : 'Nothing logged yet'
+                  topCategory ? `${money(topCategory.total, currency)} ${periodWord}` : 'Nothing logged yet'
                 }
               />
               <StatTile
@@ -258,7 +268,7 @@ export function DashboardPage() {
               ))
             ) : data.recent.length === 0 ? (
               <EmptyState
-                title="No expenses this month"
+                title={isCurrentMonth ? 'No expenses this month' : `No expenses in ${monthOnly}`}
                 description="Once you add one — here or through your assistant — it shows up here."
               />
             ) : (

@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2, Wallet } from 'lucide-react'
+import { Pencil, Plus, Trash2, Wallet } from 'lucide-react'
+import { MonthSwitcher } from '@/components/month-switcher'
 import { toast } from 'sonner'
 import {
   deleteBudget,
@@ -83,12 +84,6 @@ export function BudgetsPage() {
     void load()
   }, [load])
 
-  function shiftMonth(by: number) {
-    const next = new Date(year, month - 1 + by, 1)
-    setYear(next.getFullYear())
-    setMonth(next.getMonth() + 1)
-  }
-
   const overall = status?.find((row) => row.category_id === null)
   const perCategory = status?.filter((row) => row.category_id !== null) ?? []
   const daysLeft = daysLeftInMonth(year, month)
@@ -115,27 +110,14 @@ export function BudgetsPage() {
   return (
     <>
       <PageHeader title="Budgets">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => shiftMonth(-1)}
-            aria-label="Previous month"
-            className="flex size-10 cursor-pointer items-center justify-center rounded-lg border border-border bg-card text-ink-mid hover:bg-secondary"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <span className="tabular min-w-[132px] text-center text-[13.5px] font-medium text-ink-mid">
-            {monthLabel(year, month)}
-          </span>
-          <button
-            type="button"
-            onClick={() => shiftMonth(1)}
-            aria-label="Next month"
-            className="flex size-10 cursor-pointer items-center justify-center rounded-lg border border-border bg-card text-ink-mid hover:bg-secondary"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
+        <MonthSwitcher
+          year={year}
+          month={month}
+          onChange={(nextYear, nextMonth) => {
+            setYear(nextYear)
+            setMonth(nextMonth)
+          }}
+        />
         <PrimaryButton onClick={() => openEditor(null)}>
           <Plus className="size-4" strokeWidth={2.1} />
           New budget

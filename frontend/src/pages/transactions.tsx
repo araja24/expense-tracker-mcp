@@ -20,7 +20,8 @@ import {
   recategorizeExpenses,
 } from '@/lib/api'
 import { downloadCsv, expensesToCsv } from '@/lib/csv'
-import { longDate, money } from '@/lib/format'
+import { longDate, money, monthBounds } from '@/lib/format'
+import { MonthSwitcher } from '@/components/month-switcher'
 import type { Category, Expense, ExpenseFilters } from '@/lib/types'
 import { useCurrency } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
@@ -66,8 +67,16 @@ export function TransactionsPage() {
   const [searchInput, setSearchInput] = React.useState(searchParams.get('q') ?? '')
   const [search, setSearch] = React.useState(searchInput)
   const [categoryId, setCategoryId] = React.useState<string | null>(searchParams.get('category'))
-  const [from, setFrom] = React.useState(searchParams.get('from') ?? '')
-  const [to, setTo] = React.useState(searchParams.get('to') ?? '')
+  // Open on the current month unless a link brought its own date range.
+  const [initialRange] = React.useState(() => {
+    const linkedFrom = searchParams.get('from')
+    const linkedTo = searchParams.get('to')
+    if (linkedFrom || linkedTo) return { from: linkedFrom ?? '', to: linkedTo ?? '' }
+    const today = new Date()
+    return monthBounds(today.getFullYear(), today.getMonth() + 1)
+  })
+  const [from, setFrom] = React.useState(initialRange.from)
+  const [to, setTo] = React.useState(initialRange.to)
   const [minAmount, setMinAmount] = React.useState(searchParams.get('min') ?? '')
   const [maxAmount, setMaxAmount] = React.useState(searchParams.get('max') ?? '')
 
@@ -130,6 +139,12 @@ export function TransactionsPage() {
   }, [load])
 
   const dateLabel = rangeLabel(from, to)
+
+  // The header switcher follows the start of whatever range is set, falling
+  // back to the current month when the range is cleared.
+  const anchor = parseIsoDate(from || to) ?? new Date()
+  const switcherYear = anchor.getFullYear()
+  const switcherMonth = anchor.getMonth() + 1
 
   const categoryLabel =
     categoryId === null
@@ -222,7 +237,15 @@ export function TransactionsPage() {
   return (
     <>
       <PageHeader title="Transactions">
-        <SelectButton>{dateLabel}</SelectButton>
+        <MonthSwitcher
+          year={switcherYear}
+          month={switcherMonth}
+          onChange={(year, month) => {
+            const bounds = monthBounds(year, month)
+            setFrom(bounds.from)
+            setTo(bounds.to)
+          }}
+        />
         <PrimaryButton
           onClick={() => {
             setEditing(null)
@@ -629,6 +652,12 @@ export function TransactionsPage() {
       />
     </>
   )
+}
+
+function parseIsoDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
 }
 
 function rangeLabel(from: string, to: string): string {
