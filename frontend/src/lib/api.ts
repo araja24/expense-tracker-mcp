@@ -33,7 +33,7 @@ function normalizeExpense(row: Record<string, unknown>): Expense {
     description: String(row.description),
     amount: num(row.amount),
     expense_date: String(row.expense_date),
-    source: row.source === 'ai' ? 'ai' : 'manual',
+    source: row.source === 'ai' || row.source === 'import' ? row.source : 'manual',
     notes: (row.notes as string | null) ?? null,
     category_id: (row.category_id as string | null) ?? null,
     categories: (row.categories as Expense['categories']) ?? null,

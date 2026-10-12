@@ -223,9 +223,18 @@ the app, and can be cut off from there.
 | `set_budget` | set or update a monthly budget (overall or per category) |
 | `get_budget_status` | spent vs. budget, flagging anything exceeded |
 | `export_expenses_csv` | CSV of the matching expenses |
+| `parse_bank_statement` | read a bank CSV export: nets out refunds, reversals and fee pairs, skips lines imported before, and returns the purchases grouped by merchant |
+| `list_batch_rows` | the individual rows for some merchants in that batch, to split a mixed merchant |
+| `import_transactions` | save the batch with one existing category per merchant (plus per-row overrides and exclusions); never creates categories |
 
-**Prompt:** `log_expense` — pre-filled with the user's categories and budget
+**Prompts:** `log_expense` — pre-filled with the user's categories and budget
 position, so they can say what they bought without thinking about categories.
+`import_bank_statement` — walks the assistant through importing a statement
+under fixed categorization rules.
+
+Imported rows carry an `external_id` fingerprint of the statement line
+(migration `0006_bank_import.sql`), so importing an overlapping statement again
+only adds what is new.
 
 **Resources:** `tally://categories` and `tally://budget-status` — live context, so
 the assistant reuses existing categories and can mention a budget it is about to

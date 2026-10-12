@@ -10,8 +10,11 @@ export interface Expense {
   description: string
   amount: number
   expense_date: string
-  /** 'ai' means it was logged through the assistant over MCP. */
-  source: 'manual' | 'ai'
+  /**
+   * 'ai' means it was logged through the assistant over MCP; 'import' that it
+   * came from a bank statement the assistant imported.
+   */
+  source: 'manual' | 'ai' | 'import'
   notes: string | null
   category_id: string | null
   categories: Pick<Category, 'id' | 'name' | 'color' | 'icon'> | null

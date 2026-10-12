@@ -20,7 +20,7 @@ import {
   recategorizeExpenses,
 } from '@/lib/api'
 import { downloadCsv, expensesToCsv } from '@/lib/csv'
-import { longDate, money, monthBounds } from '@/lib/format'
+import { longDate, money, monthBounds, sourceLabel } from '@/lib/format'
 import { MonthSwitcher } from '@/components/month-switcher'
 import type { Category, Expense, ExpenseFilters } from '@/lib/types'
 import { useCurrency } from '@/hooks/use-auth'
@@ -547,7 +547,7 @@ export function TransactionsPage() {
                       {expense.description}
                     </span>
                     <span className="truncate text-[12px] font-medium text-ink-muted">
-                      {expense.source === 'ai' ? 'Logged via chat' : 'Added manually'}
+                      {sourceLabel(expense.source)}
                       {expense.notes ? ` · ${expense.notes}` : ''}
                     </span>
                   </span>

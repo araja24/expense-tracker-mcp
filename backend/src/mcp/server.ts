@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 import { userClient, userId as userIdOf } from '../lib/supabase.js';
 import * as data from '../lib/expenses.js';
+import { parseBankCsv } from '../lib/bank-csv.js';
+import * as batches from './import-batches.js';
 import { budgetText, expenseLine, expensesToCsv, money, monthName, summaryText } from '../lib/format.js';
 
 /**
@@ -59,6 +61,93 @@ function today(): { year: number; month: number } {
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
 }
 
+// ------------------------------------------------------------ statement import
+
+/**
+ * How the assistant should categorize an imported statement. Fixed here rather
+ * than left to the model's taste, so every import files things the same way —
+ * and only into categories the user already has.
+ */
+const IMPORT_GUIDELINES = [
+  'How to categorize:',
+  '- Use ONLY the user\'s existing categories listed above, or null for Uncategorized. Never invent a name; if the user wants a new bucket (e.g. Donations, Subscriptions), they create it in Tally first.',
+  '- Go by what was most likely bought, not the merchant\'s industry: restaurants, cafés and takeout → dining; supermarkets → groceries; transit, rideshare, bike share, fuel and car insurance → transport; phone and internet → utilities; retail and online stores → shopping.',
+  '- Multi-purpose merchants (Amazon, Walmart, pharmacies, convenience stores) go to Uncategorized unless the amounts make it clear. Use list_batch_rows to split one with overrides if the user tells you how.',
+  '- Transfers to people, ATM withdrawals, tuition and other large one-offs may not be spending: ask whether to include them, in one combined question. Leave them out if the user does not say.',
+  '- Before importing, show the user the plan in a few lines (merchant → category, totals) and wait for a yes.'
+].join('\n');
+
+type StagedRow = batches.Batch['rows'][number];
+
+function rowLine(key: string, row: StagedRow, currency: string): string {
+  return `  ${key.padEnd(5)} ${row.date}  ${money(row.amount, currency).padStart(11)}  ${row.merchant}${row.notes ? ` (${row.notes})` : ''}`;
+}
+
+const SKIP_LABELS: Record<string, string> = {
+  credit: 'credits/income',
+  reversed: 'reversed or refunded',
+  'fee-netted': 'bank fees cancelled by their discount',
+  unreadable: 'unreadable (probably cut off — re-send those lines)'
+};
+
+function batchSummary(batch: batches.Batch, categoryNames: string[], currency: string): string {
+  const groups = new Map<string, { name: string; entries: { row: StagedRow; key: string }[]; total: number }>();
+  batch.rows.forEach((row, index) => {
+    const id = row.merchant.toLowerCase();
+    const group = groups.get(id) ?? { name: row.merchant, entries: [], total: 0 };
+    group.entries.push({ row, key: batches.rowKey(index) });
+    group.total += row.amount;
+    groups.set(id, group);
+  });
+
+  const sorted = [...groups.values()].sort((a, b) => b.total - a.total);
+  const total = batch.rows.reduce((sum, row) => sum + row.amount, 0);
+
+  const merchantLines = sorted.map(group => {
+    const dates = group.entries.map(entry => entry.row.date).sort();
+    const span = dates[0] === dates.at(-1) ? dates[0] : `${dates[0]} → ${dates.at(-1)}`;
+    const count = group.entries.length;
+    return `  ${group.name} — ${count} ${count === 1 ? 'row' : 'rows'}, ${money(group.total, currency)} (${span})`;
+  });
+
+  // Rows that stand out — big, or far above what that merchant usually costs —
+  // are listed so the assistant can recategorize or exclude them one by one.
+  const standouts = sorted.flatMap(group => {
+    const amounts = group.entries.map(entry => entry.row.amount).sort((a, b) => a - b);
+    const median = amounts[Math.floor(amounts.length / 2)] ?? 0;
+    return group.entries.filter(
+      ({ row }) => row.amount >= 250 || (amounts.length >= 3 && row.amount > median * 3)
+    );
+  });
+
+  const skippedCounts = new Map<string, number>();
+  for (const row of batch.skipped) skippedCounts.set(row.reason, (skippedCounts.get(row.reason) ?? 0) + 1);
+  const skippedLine = [...skippedCounts.entries()]
+    .map(([reason, count]) => `${count} ${SKIP_LABELS[reason] ?? reason}`)
+    .join(', ');
+
+  return [
+    `Import batch ${batch.id} — held for 30 minutes.`,
+    `${batch.rows.length} purchases to import, totalling ${money(total, currency)}, from ${groups.size} merchants.`,
+    batch.alreadyImported > 0 ? `${batch.alreadyImported} lines were already imported earlier and are left out.` : '',
+    skippedLine ? `Skipped automatically: ${skippedLine}.` : '',
+    '',
+    `The user's categories: ${categoryNames.join(', ') || '(none yet)'}.`,
+    '',
+    'Merchants (largest first):',
+    ...merchantLines,
+    ...(standouts.length > 0
+      ? ['', 'Rows that stand out (row key, date, amount, merchant):', ...standouts.map(({ row, key }) => rowLine(key, row, currency))]
+      : []),
+    '',
+    IMPORT_GUIDELINES,
+    '',
+    `Then call import_transactions with batch_id "${batch.id}", one { merchant, category } per merchant above, and any overrides or exclusions.`
+  ]
+    .filter((line, index, all) => line !== '' || all[index - 1] !== '')
+    .join('\n');
+}
+
 export function buildMcpServer(auth: AuthInfo): McpServer {
   const db = userClient(auth);
   const uid = userIdOf(auth);
@@ -73,7 +162,9 @@ export function buildMcpServer(auth: AuthInfo): McpServer {
         'ambiguous; add_expense will match or create one. Read the `tally://categories` ' +
         'resource before guessing a new category name so you reuse what already exists. ' +
         'After logging, if `tally://budget-status` shows a category near or over its ' +
-        'budget, mention it once, briefly.'
+        'budget, mention it once, briefly. When the user shares a bank statement CSV, import it ' +
+        'with parse_bank_statement then import_transactions, following the categorization ' +
+        'guidelines parse_bank_statement returns.'
     }
   );
 
@@ -422,6 +513,223 @@ export function buildMcpServer(auth: AuthInfo): McpServer {
       })
   );
 
+  // ------------------------------------------------------------------- import
+
+  server.registerTool(
+    'parse_bank_statement',
+    {
+      title: 'Read a bank statement',
+      description:
+        'Step 1 of importing a bank statement CSV (date,description,debit,credit). Nets out reversals, ' +
+        'refunds and fee pairs, drops lines already imported, and holds the purchases for 30 minutes. ' +
+        'Returns them grouped by merchant, with the user\'s categories and how to categorize them. ' +
+        'Long statements can be sent in pieces: pass the batch_id from the first call to add more.',
+      inputSchema: {
+        csv: z.string().min(1).max(500_000).describe('The statement CSV, as exported by the bank'),
+        batch_id: z.string().max(32).optional().describe('Add to an earlier batch instead of starting a new one')
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ csv, batch_id }) =>
+      guard(async () => {
+        const parsed = parseBankCsv(csv);
+        if (!parsed.from || !parsed.to) {
+          return failure('No dated lines found. Expected rows like: 2026-10-08,<description>,<debit>,<credit>');
+        }
+
+        const existing = await data.existingExternalIds(db, parsed.from, parsed.to);
+        const fresh = parsed.rows.filter(row => !existing.has(row.id));
+        const batch = batches.stageBatch(
+          uid,
+          { rows: fresh, skipped: parsed.skipped, alreadyImported: parsed.rows.length - fresh.length },
+          batch_id
+        );
+
+        const [currency, categories] = await Promise.all([currencyOf(), data.listCategories(db)]);
+        return text(batchSummary(batch, categories.map(c => c.name), currency));
+      })
+  );
+
+  server.registerTool(
+    'list_batch_rows',
+    {
+      title: 'Show rows in an import batch',
+      description:
+        'List the individual purchases for some merchants in a staged import, with their row keys (r1, r2…), ' +
+        'so a merchant that sells several kinds of things can be split with overrides.',
+      inputSchema: {
+        batch_id: z.string().max(32),
+        merchants: z.array(z.string().max(200)).min(1).max(50)
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async ({ batch_id, merchants }) =>
+      guard(async () => {
+        const batch = batches.getBatch(uid, batch_id);
+        const currency = await currencyOf();
+        const wanted = new Set(merchants.map(name => name.trim().toLowerCase()));
+
+        const lines = batch.rows
+          .map((row, index) => ({ row, key: batches.rowKey(index) }))
+          .filter(({ row }) => wanted.has(row.merchant.toLowerCase()))
+          .map(({ row, key }) => rowLine(key, row, currency));
+
+        return text(lines.length > 0 ? lines.join('\n') : 'None of those merchants are in this batch.');
+      })
+  );
+
+  server.registerTool(
+    'import_transactions',
+    {
+      title: 'Import a categorized bank statement',
+      description:
+        'Step 2: save a batch from parse_bank_statement. Give every merchant in the batch exactly one ' +
+        'category — an existing category name, or null for Uncategorized. Use overrides to recategorize ' +
+        'single rows and exclude to leave merchants or rows out. Categories are never created here: ' +
+        'an unknown name rejects the whole call and nothing is saved.',
+      inputSchema: {
+        batch_id: z.string().max(32),
+        merchants: z
+          .array(z.object({ merchant: z.string().max(200), category: z.string().max(60).nullable() }))
+          .max(2_000),
+        overrides: z
+          .array(
+            z.object({
+              row: z.string().max(10).describe('Row key such as "r12"'),
+              category: z.string().max(60).nullable()
+            })
+          )
+          .max(5_000)
+          .optional(),
+        exclude: z
+          .array(z.string().max(200))
+          .max(5_000)
+          .optional()
+          .describe('Merchant names or row keys to leave out')
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+    },
+    async ({ batch_id, merchants, overrides = [], exclude = [] }) =>
+      guard(async () => {
+        const batch = batches.getBatch(uid, batch_id);
+        const [currency, categories] = await Promise.all([currencyOf(), data.listCategories(db)]);
+        const byName = new Map(categories.map(c => [c.name.trim().toLowerCase(), c]));
+        const categoryFor = (name: string | null) =>
+          name === null ? null : (byName.get(name.trim().toLowerCase()) ?? null);
+        const inBatch = new Set(batch.rows.map(row => row.merchant.toLowerCase()));
+
+        // Validate everything before writing anything.
+        const problems: string[] = [];
+
+        const unknown = [...merchants.map(m => m.category), ...overrides.map(o => o.category)].filter(
+          (name): name is string => name !== null && !categoryFor(name)
+        );
+        if (unknown.length > 0) {
+          problems.push(
+            `Unknown categories: ${[...new Set(unknown)].join(', ')}. Use one of: ` +
+              `${categories.map(c => c.name).join(', ') || '(none yet)'}, or null for Uncategorized.`
+          );
+        }
+
+        const assigned = new Map<string, string | null>();
+        for (const { merchant, category } of merchants) {
+          const key = merchant.trim().toLowerCase();
+          if (!inBatch.has(key)) problems.push(`"${merchant}" is not a merchant in this batch.`);
+          assigned.set(key, category);
+        }
+
+        const overridden = new Map<number, string | null>();
+        for (const { row, category } of overrides) {
+          const index = batches.rowIndex(batch, row);
+          if (index === null) problems.push(`"${row}" is not a row in this batch.`);
+          else overridden.set(index, category);
+        }
+
+        const excludedRows = new Set<number>();
+        const excludedMerchants = new Set<string>();
+        for (const entry of exclude) {
+          const index = batches.rowIndex(batch, entry);
+          const key = entry.trim().toLowerCase();
+          if (index !== null) excludedRows.add(index);
+          else if (inBatch.has(key)) excludedMerchants.add(key);
+          else problems.push(`Cannot exclude "${entry}": not a merchant or row key in this batch.`);
+        }
+
+        const missing = new Set(
+          batch.rows
+            .filter(row => {
+              const key = row.merchant.toLowerCase();
+              return !assigned.has(key) && !excludedMerchants.has(key);
+            })
+            .map(row => row.merchant)
+        );
+        if (missing.size > 0) {
+          problems.push(
+            `No category given for: ${[...missing].join(', ')}. Assign each one (null for Uncategorized) or exclude it.`
+          );
+        }
+
+        if (problems.length > 0) return failure(`Nothing was imported.\n${problems.join('\n')}`);
+
+        const inputs: data.ImportInput[] = [];
+        batch.rows.forEach((row, index) => {
+          const key = row.merchant.toLowerCase();
+          if (excludedRows.has(index) || excludedMerchants.has(key)) return;
+          const name = overridden.has(index) ? overridden.get(index) : assigned.get(key);
+          inputs.push({
+            externalId: row.id,
+            date: row.date,
+            description: row.merchant,
+            amount: row.amount,
+            categoryId: categoryFor(name ?? null)?.id ?? null,
+            notes: row.notes
+          });
+        });
+
+        const { inserted, duplicates } = await data.importExpenses(db, uid, inputs);
+        batches.dropBatch(batch.id);
+
+        const byCategory = new Map<string, { total: number; count: number }>();
+        for (const expense of inserted) {
+          const name = expense.categories?.name ?? 'Uncategorized';
+          const entry = byCategory.get(name) ?? { total: 0, count: 0 };
+          entry.total += expense.amount;
+          entry.count += 1;
+          byCategory.set(name, entry);
+        }
+        const grand = inserted.reduce((sum, expense) => sum + expense.amount, 0);
+        const lines = [...byCategory.entries()]
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(
+            ([name, { total, count }]) =>
+              `  ${name.padEnd(14)} ${money(total, currency).padStart(12)}  (${count})`
+          );
+
+        const leftOut = batch.rows.length - inputs.length;
+        const extras = [
+          duplicates > 0 ? `${duplicates} already imported` : '',
+          leftOut > 0 ? `${leftOut} left out` : ''
+        ].filter(Boolean);
+
+        // Only this month's budgets are worth a warning; old months are history.
+        const now = today();
+        const near = (await data.budgetStatus(db, now.year, now.month)).filter(
+          row => row.exceeded || row.pct_used >= 80
+        );
+        const note =
+          near.length > 0
+            ? `\n\nHeads up for ${monthName(now.year, now.month)}: ${near
+                .map(row => `${row.category_name} at ${row.pct_used}% of ${money(row.budget, currency)}`)
+                .join('; ')}.`
+            : '';
+
+        return text(
+          `Imported ${inserted.length} ${inserted.length === 1 ? 'expense' : 'expenses'} totalling ${money(grand, currency)}` +
+            `${extras.length > 0 ? ` (${extras.join(', ')})` : ''}.\n\n${lines.join('\n')}${note}`
+        );
+      })
+  );
+
   // ------------------------------------------------------------------- export
 
   server.registerTool(
@@ -517,6 +825,41 @@ export function buildMcpServer(auth: AuthInfo): McpServer {
                 'Log each item with add_expense (or add_expenses_bulk for several).',
                 'Pick the closest existing category; create a new one only if none fits.',
                 'Do not ask me to choose a category. Tell me what you logged, and mention any budget I am close to or over.'
+              ].join('\n')
+            }
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerPrompt(
+    'import_bank_statement',
+    {
+      title: 'Import a bank statement',
+      description:
+        'Load a bank statement CSV into Tally. The assistant nets out refunds and reversals and files every purchase into your existing categories.',
+      argsSchema: {
+        csv: z.string().optional().describe('The statement CSV (or attach / paste it afterwards)')
+      }
+    },
+    async ({ csv }) => {
+      const categories = await data.listCategories(db);
+      return {
+        messages: [
+          {
+            role: 'user' as const,
+            content: {
+              type: 'text' as const,
+              text: [
+                'Import my bank statement into Tally.',
+                `My categories: ${categories.map(c => c.name).join(', ') || '(none yet)'}.`,
+                '',
+                'Pass the CSV to parse_bank_statement (in pieces if it is very long, reusing the batch_id),',
+                'categorize every merchant it returns, show me the plan, then call import_transactions.',
+                '',
+                IMPORT_GUIDELINES,
+                ...(csv ? ['', 'The statement:', csv] : ['', 'I will paste or attach the statement next.'])
               ].join('\n')
             }
           }

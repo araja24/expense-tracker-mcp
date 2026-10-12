@@ -16,7 +16,7 @@ import {
   fetchMonthlyTotals,
   fetchSummary,
 } from '@/lib/api'
-import { money, monthBounds, monthLabel, percent, shortDate } from '@/lib/format'
+import { money, monthBounds, monthLabel, percent, shortDate, sourceLabel } from '@/lib/format'
 import type { BudgetStatusRow, Category, Expense, SummaryRow } from '@/lib/types'
 import { useCurrency } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
@@ -286,7 +286,7 @@ export function DashboardPage() {
                       {expense.description}
                     </span>
                     <span className="truncate text-[12px] font-medium text-ink-muted">
-                      {expense.source === 'ai' ? 'Logged via chat' : (expense.notes ?? 'Added manually')}
+                      {expense.source === 'manual' ? (expense.notes ?? sourceLabel(expense.source)) : sourceLabel(expense.source)}
                       {' · '}
                       {shortDate(expense.expense_date)}
                     </span>

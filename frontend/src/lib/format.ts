@@ -76,3 +76,10 @@ export function initials(name: string | null | undefined, fallback: string) {
   const parts = source.split(/[\s@._-]+/).filter(Boolean)
   return (parts.slice(0, 2).map((p) => p[0]).join('') || source[0] || '?').toUpperCase()
 }
+
+/** How an expense got into Tally, for the line under its description. */
+export function sourceLabel(source: 'manual' | 'ai' | 'import'): string {
+  if (source === 'ai') return 'Logged via chat'
+  if (source === 'import') return 'Imported from bank'
+  return 'Added manually'
+}

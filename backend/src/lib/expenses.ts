@@ -9,12 +9,14 @@ export interface Category {
   icon: string;
 }
 
+export type ExpenseSource = 'manual' | 'ai' | 'import';
+
 export interface Expense {
   id: string;
   description: string;
   amount: number;
   expense_date: string;
-  source: 'manual' | 'ai';
+  source: ExpenseSource;
   notes: string | null;
   category_id: string | null;
   categories: Pick<Category, 'id' | 'name' | 'color'> | null;
@@ -65,7 +67,7 @@ function normalizeExpense(row: Record<string, unknown>): Expense {
     description: String(row.description),
     amount: num(row.amount),
     expense_date: String(row.expense_date),
-    source: row.source === 'ai' ? 'ai' : 'manual',
+    source: row.source === 'ai' || row.source === 'import' ? row.source : 'manual',
     notes: (row.notes as string | null) ?? null,
     category_id: (row.category_id as string | null) ?? null,
     categories: (row.categories as Expense['categories']) ?? null
@@ -184,7 +186,7 @@ export async function addExpense(
   db: SupabaseClient,
   userId: string,
   input: ExpenseInput,
-  source: 'manual' | 'ai'
+  source: ExpenseSource
 ): Promise<Expense> {
   const category = await resolveCategory(db, userId, input.category);
 
@@ -210,7 +212,7 @@ export async function addExpensesBulk(
   db: SupabaseClient,
   userId: string,
   inputs: ExpenseInput[],
-  source: 'manual' | 'ai'
+  source: ExpenseSource
 ): Promise<Expense[]> {
   // Resolved one at a time on purpose: two items in the same message may name
   // the same new category, and the second must reuse what the first created.
@@ -277,6 +279,72 @@ export async function deleteExpense(db: SupabaseClient, id: string): Promise<Exp
 
   fail('Could not delete expense', error);
   return data ? normalizeExpense(data as Record<string, unknown>) : null;
+}
+
+// -------------------------------------------------------------------- import
+
+export interface ImportInput {
+  /** Stable fingerprint of the statement line; see lib/bank-csv.ts. */
+  externalId: string;
+  date: string;
+  description: string;
+  amount: number;
+  categoryId: string | null;
+  notes: string | null;
+}
+
+/** External ids already stored for the date range, so a re-import can skip them. */
+export async function existingExternalIds(
+  db: SupabaseClient,
+  from: string,
+  to: string
+): Promise<Set<string>> {
+  const { data, error } = await db
+    .from('expenses')
+    .select('external_id')
+    .not('external_id', 'is', null)
+    .gte('expense_date', from)
+    .lte('expense_date', to);
+
+  fail('Could not check for earlier imports', error);
+  return new Set(((data ?? []) as { external_id: string }[]).map(row => row.external_id));
+}
+
+const IMPORT_CHUNK = 200;
+
+/**
+ * Inserts statement lines, silently skipping any whose external id is already
+ * stored. Categories must already be resolved: an import never creates one.
+ */
+export async function importExpenses(
+  db: SupabaseClient,
+  userId: string,
+  inputs: ImportInput[]
+): Promise<{ inserted: Expense[]; duplicates: number }> {
+  const inserted: Expense[] = [];
+
+  for (let start = 0; start < inputs.length; start += IMPORT_CHUNK) {
+    const rows = inputs.slice(start, start + IMPORT_CHUNK).map(input => ({
+      user_id: userId,
+      external_id: input.externalId,
+      description: input.description.trim().slice(0, 200),
+      amount: input.amount,
+      category_id: input.categoryId,
+      expense_date: input.date,
+      notes: input.notes,
+      source: 'import' as const
+    }));
+
+    const { data, error } = await db
+      .from('expenses')
+      .upsert(rows, { onConflict: 'user_id,external_id', ignoreDuplicates: true })
+      .select(EXPENSE_COLUMNS);
+
+    fail('Could not import expenses', error);
+    inserted.push(...(data ?? []).map(row => normalizeExpense(row as Record<string, unknown>)));
+  }
+
+  return { inserted, duplicates: inputs.length - inserted.length };
 }
 
 export async function listExpenses(
