@@ -190,6 +190,29 @@ export async function deleteExpenses(ids: string[]): Promise<void> {
   unwrap(null, error, 'Could not delete expenses')
 }
 
+/**
+ * Bulk delete by date. Omitting both bounds targets every expense; PostgREST
+ * refuses an unfiltered delete, so that case gets an always-true filter.
+ */
+export async function countExpensesInRange(from?: string, to?: string): Promise<number> {
+  let query = supabase.from('expenses').select('id', { count: 'exact', head: true })
+  if (from) query = query.gte('expense_date', from)
+  if (to) query = query.lte('expense_date', to)
+  const { count, error } = await query
+  unwrap(null, error, 'Could not count expenses')
+  return count ?? 0
+}
+
+export async function deleteExpensesInRange(from?: string, to?: string): Promise<number> {
+  let query = supabase.from('expenses').delete({ count: 'exact' })
+  if (from) query = query.gte('expense_date', from)
+  if (to) query = query.lte('expense_date', to)
+  if (!from && !to) query = query.not('id', 'is', null)
+  const { count, error } = await query
+  unwrap(null, error, 'Could not delete expenses')
+  return count ?? 0
+}
+
 export async function recategorizeExpenses(
   ids: string[],
   categoryId: string | null,

@@ -2,8 +2,10 @@ import * as React from 'react'
 import { Pencil, Plus, SlidersHorizontal, Tag, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
+  countExpensesInRange,
   createCategory,
   deleteCategory,
+  deleteExpensesInRange,
   fetchBudgets,
   fetchCategories,
   fetchCategoryCounts,
@@ -383,6 +385,8 @@ export function SettingsPage() {
             />
           </SettingRow>
         </Panel>
+
+        <DeleteTransactionsPanel onDeleted={load} />
       </PageBody>
 
       <CategoryDialog
@@ -390,6 +394,217 @@ export function SettingsPage() {
         onClose={() => setCategoryDialog(null)}
         onSaved={load}
       />
+    </>
+  )
+}
+
+type DeleteRange = 'day' | 'month' | 'period' | 'all'
+
+const dateInputClass =
+  'h-[38px] w-[200px] shrink-0 rounded-lg border border-border bg-card px-2.5 text-[13.5px] font-medium text-ink-strong outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20'
+
+function pad(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+/** Resolves the picked range to inclusive ISO dates, or null while incomplete. */
+function resolveRange(
+  range: DeleteRange,
+  day: string,
+  month: string,
+  from: string,
+  to: string,
+): { from?: string; to?: string; label: string } | null {
+  if (range === 'all') return { label: 'all transactions' }
+  if (range === 'day') return day ? { from: day, to: day, label: `on ${day}` } : null
+  if (range === 'month') {
+    if (!month) return null
+    const [y, m] = month.split('-').map(Number) as [number, number]
+    const last = new Date(y, m, 0).getDate()
+    return { from: `${month}-01`, to: `${month}-${pad(last)}`, label: `in ${month}` }
+  }
+  if (!from || !to || from > to) return null
+  return { from, to, label: `from ${from} to ${to}` }
+}
+
+function DeleteTransactionsPanel({ onDeleted }: { onDeleted: () => void }) {
+  const [range, setRange] = React.useState<DeleteRange>('day')
+  const [day, setDay] = React.useState('')
+  const [month, setMonth] = React.useState('')
+  const [from, setFrom] = React.useState('')
+  const [to, setTo] = React.useState('')
+
+  const [pending, setPending] = React.useState<{
+    from?: string
+    to?: string
+    label: string
+    count: number
+  } | null>(null)
+  const [confirmText, setConfirmText] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+
+  const resolved = resolveRange(range, day, month, from, to)
+
+  async function review() {
+    if (!resolved) return
+    setBusy(true)
+    try {
+      const count = await countExpensesInRange(resolved.from, resolved.to)
+      if (count === 0) {
+        toast.message('No transactions match that range.')
+        return
+      }
+      setConfirmText('')
+      setPending({ ...resolved, count })
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Could not check that range')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirm() {
+    if (!pending) return
+    setBusy(true)
+    try {
+      const deleted = await deleteExpensesInRange(pending.from, pending.to)
+      toast.success(`Deleted ${deleted} ${deleted === 1 ? 'transaction' : 'transactions'}`)
+      setPending(null)
+      onDeleted()
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Could not delete transactions')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const needsTyping = range === 'all'
+  const canConfirm = !busy && (!needsTyping || confirmText === 'DELETE')
+
+  return (
+    <>
+      <Panel>
+        <PanelHead
+          icon={Trash2}
+          tint="#EF4444"
+          title="Delete transactions"
+          description="Permanently remove transactions from a day, month, period, or everything."
+        />
+
+        <SettingRow title="Range" description="Which transactions to remove." htmlFor="del-range">
+          <SettingSelect
+            id="del-range"
+            value={range}
+            onChange={(next) => setRange(next as DeleteRange)}
+          >
+            <option value="day">A single day</option>
+            <option value="month">A month</option>
+            <option value="period">A custom period</option>
+            <option value="all">All transactions</option>
+          </SettingSelect>
+        </SettingRow>
+
+        {range === 'day' && (
+          <SettingRow title="Date" description="Every transaction on this day." htmlFor="del-day">
+            <input
+              id="del-day"
+              type="date"
+              value={day}
+              onChange={(event) => setDay(event.target.value)}
+              className={dateInputClass}
+            />
+          </SettingRow>
+        )}
+
+        {range === 'month' && (
+          <SettingRow
+            title="Month"
+            description="Every transaction in this calendar month."
+            htmlFor="del-month"
+          >
+            <input
+              id="del-month"
+              type="month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+              className={dateInputClass}
+            />
+          </SettingRow>
+        )}
+
+        {range === 'period' && (
+          <>
+            <SettingRow title="From" description="First day, inclusive." htmlFor="del-from">
+              <input
+                id="del-from"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+                className={dateInputClass}
+              />
+            </SettingRow>
+            <SettingRow title="To" description="Last day, inclusive." htmlFor="del-to">
+              <input
+                id="del-to"
+                type="date"
+                value={to}
+                min={from || undefined}
+                onChange={(event) => setTo(event.target.value)}
+                className={dateInputClass}
+              />
+            </SettingRow>
+          </>
+        )}
+
+        <div className="flex justify-end border-t border-divider px-[22px] py-[15px]">
+          <GhostButton tone="danger" disabled={!resolved || busy} onClick={() => void review()}>
+            <Trash2 className="size-[15px]" strokeWidth={2.1} />
+            {busy && !pending ? 'Checking…' : 'Delete…'}
+          </GhostButton>
+        </div>
+      </Panel>
+
+      <Dialog open={pending !== null} onOpenChange={(open) => !open && !busy && setPending(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete transactions?</DialogTitle>
+          </DialogHeader>
+
+          <p className="text-[13.5px] font-medium text-ink-mid">
+            This will permanently delete {pending?.count}{' '}
+            {pending?.count === 1 ? 'transaction' : 'transactions'} ({pending?.label}). This can't
+            be undone.
+          </p>
+
+          {needsTyping && (
+            <div className="grid gap-1.5">
+              <label htmlFor="del-confirm" className="text-[12.5px] font-semibold">
+                Type DELETE to confirm
+              </label>
+              <input
+                id="del-confirm"
+                value={confirmText}
+                autoComplete="off"
+                onChange={(event) => setConfirmText(event.target.value)}
+                className="h-10 rounded-lg border border-input bg-muted px-3 text-[13.5px] font-medium outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+              />
+            </div>
+          )}
+
+          <DialogFooter>
+            <GhostButton onClick={() => setPending(null)} disabled={busy}>
+              Cancel
+            </GhostButton>
+            <PrimaryButton
+              className="border-destructive bg-destructive hover:border-destructive hover:bg-destructive/90"
+              disabled={!canConfirm}
+              onClick={() => void confirm()}
+            >
+              {busy ? 'Deleting…' : 'Delete'}
+            </PrimaryButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
